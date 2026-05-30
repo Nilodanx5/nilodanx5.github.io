@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DNSSEC & AD Security Auditor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .status-valid { color: #10b981; }
+        .status-invalid { color: #ef4444; }
+        .status-pending { color: #f59e0b; }
+        .log-entry { font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-4 md:p-8">
+    <div class="max-w-5xl mx-auto">
+        <header class="mb-8 border-b border-slate-700 pb-4">
+            <h1 class="text-3xl font-bold text-blue-400">DNSSEC & AD Auditor</h1>
+            <p class="text-slate-400 mt-2">Validando integridade e autenticidade via Unbound (DoH)</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                <span class="block text-sm text-slate-400 uppercase">Progresso</span>
+                <span id="progressText" class="text-2xl font-mono">0 / 50</span>
+            </div>
+            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                <span class="block text-sm text-slate-400 uppercase">DNSSEC (AD Bit)</span>
+                <span id="adCount" class="text-2xl font-mono text-green-400">0</span>
+            </div>
+            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                <span class="block text-sm text-slate-400 uppercase">Falhas/Inseguros</span>
+                <span id="failCount" class="text-2xl font-mono text-red-400">0</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="startBtn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded transition-all">Iniciar Auditoria</button>
+                <button id="resetBtn" class="bg-slate-700 hover:bg-slate-600 p-3 rounded transition-all">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+            <div class="grid grid-cols-12 bg-slate-700 p-3 text-sm font-bold uppercase tracking-wider">
+                <div class="col-span-5">Domínio</div>
+                <div class="col-span-2 text-center">Status</div>
+                <div class="col-span-2 text-center">DNSSEC (AD)</div>
+                <div class="col-span-3 text-right">Latência</div>
+            </div>
+            <div id="results" class="divide-y divide-slate-700 max-h-[600px] overflow-y-auto">
+                <div class="p-8 text-center text-slate-500 italic">Aguardando comando para iniciar auditoria...</div>
+            </div>
+        </div>
+
+        <footer class="mt-8 text-sm text-slate-500 flex justify-between items-center">
+            <div>Unbound DNSSEC Validation Tool</div>
+            <div class="flex items-center gap-4">
+                <span class="flex items-center gap-1"><span class="w-3 h-3 bg-green-500 rounded-full"></span> Seguro (AD)</span>
+                <span class="flex items-center gap-1"><span class="w-3 h-3 bg-yellow-500 rounded-full"></span> Sem DNSSEC</span>
+                <span class="flex items-center gap-1"><span class="w-3 h-3 bg-red-500 rounded-full"></span> Erro/BOGUS</span>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        const domains = [
+            "google.com", "cloudflare.com", "verisign.com", "iana.org", "icann.org",
+            "amazon.com", "microsoft.com", "github.com", "whitehouse.gov", "nasa.gov",
+            "paypal.com", "visa.com", "mastercard.com", "stripe.com", "netflix.com",
+            "disney.com", "apple.com", "wikipedia.org", "isc.org", "dnssec-failed.org",
+            "fedoraproject.org", "debian.org", "archlinux.org", "ubuntu.com", "freebsd.org",
+            "uol.com.br", "globo.com", "registro.br", "gov.br", "bb.com.br",
+            "itau.com.br", "bradesco.com.br", "caixa.gov.br", "stackexchange.com", "reddit.com",
+            "nytimes.com", "theguardian.com", "bbc.co.uk", "lemonde.fr", "elpais.com",
+            "mit.edu", "harvard.edu", "stanford.edu", "ox.ac.uk", "usp.br",
+            "ripe.net", "arin.net", "apnic.net", "lacnic.net", "afrinic.net"
+        ];
+
+        let isRunning = false;
+        let processedCount = 0;
+        let adCount = 0;
+        let failCount = 0;
+
+        // Configuração do Endpoint DoH (Ajuste para o seu Unbound exposto via HTTPS ou use Cloudflare para teste)
+        // Nota: Para usar o seu Unbound local, ele deve estar atrás de um proxy reverso HTTPS (como Nginx)
+        // O usuário pode alterar para o IP/Domínio do seu Unbound local
+        let DOH_ENDPOINT = 'https://cloudflare-dns.com/dns-query'; 
+        
+        // Adicionando campo para o usuário configurar o servidor DoH em tempo real
+        const headerContainer = document.querySelector('header');
+        const configDiv = document.createElement('div');
+        configDiv.className = 'mt-4 flex gap-2 items-center bg-slate-800 p-2 rounded border border-slate-600';
+        configDiv.innerHTML = `
+            <label class="text-xs font-bold text-slate-400 uppercase ml-2">Endpoint DoH:</label>
+            <input type="text" id="dohInput" value="${DOH_ENDPOINT}" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 flex-1 text-sm font-mono text-blue-300">
+            <p class="text-[10px] text-slate-500 italic px-2">Aponte para seu Unbound (HTTPS necessário)</p>
+        `;
+        headerContainer.appendChild(configDiv); 
+
+        async function testDNS(domain) {
+            DOH_ENDPOINT = document.getElementById('dohInput').value;
+            const resultId = `res-${domain.replace(/\./g, '-')}`;
+            const resultsDiv = document.getElementById('results');
+            
+            const row = document.createElement('div');
+            row.id = resultId;
+            row.className = 'grid grid-cols-12 p-3 text-sm items-center hover:bg-slate-750 transition-colors';
+            row.innerHTML = `
+                <div class="col-span-5 font-mono text-blue-300">${domain}</div>
+                <div class="col-span-2 text-center status-pending">PENDENTE</div>
+                <div class="col-span-2 text-center">-</div>
+                <div class="col-span-3 text-right text-slate-500">...</div>
+            `;
+            resultsDiv.prepend(row);
+
+            const startTime = performance.now();
+            try {
+                // Solicitar DNSSEC via header accept e parâmetros da query
+                // O parâmetro 'do=1' (DNSSEC OK) e 'cd=0' (Checking Disabled off)
+                const url = `${DOH_ENDPOINT}?name=${domain}&type=A&do=true`;
+                
+                // Configuração de timeout longo para aguardar a resposta do Unbound
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 segundos de espera
+
+                const response = await fetch(url, {
+                    headers: { 'Accept': 'application/dns-json' },
+                    cache: 'no-store',
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+
+                const data = await response.json();
+                const endTime = performance.now();
+                const duration = Math.round(endTime - startTime);
+
+                // AD bit (Authenticated Data) indica validação DNSSEC bem sucedida
+                const isAD = data.AD === true;
+                const isBogus = data.Status === 2; // SERVFAIL frequentemente indica erro DNSSEC (BOGUS)
+                
+                let statusHtml = '';
+                let adHtml = '';
+
+                if (data.Status === 0) {
+                    statusHtml = '<span class="text-green-500">OK</span>';
+                    if (isAD) {
+                        adHtml = '<span class="bg-green-900 text-green-300 px-2 py-0.5 rounded text-xs font-bold">VALIDADO</span>';
+                        adCount++;
+                    } else {
+                        adHtml = '<span class="bg-yellow-900 text-yellow-300 px-2 py-0.5 rounded text-xs">INSEGURO</span>';
+                    }
+                } else {
+                    statusHtml = `<span class="text-red-500">ERRO (${data.Status})</span>`;
+                    adHtml = '<span class="text-red-400">FALHA</span>';
+                    failCount++;
+                }
+
+                row.innerHTML = `
+                    <div class="col-span-5 font-mono text-blue-300">${domain}</div>
+                    <div class="col-span-2 text-center">${statusHtml}</div>
+                    <div class="col-span-2 text-center">${adHtml}</div>
+                    <div class="col-span-3 text-right font-mono">${duration}ms</div>
+                `;
+
+            } catch (e) {
+                failCount++;
+                row.innerHTML = `
+                    <div class="col-span-5 font-mono text-blue-300">${domain}</div>
+                    <div class="col-span-2 text-center text-red-500">TIMEOUT/ERRO</div>
+                    <div class="col-span-2 text-center text-red-500">FALHA</div>
+                    <div class="col-span-3 text-right text-slate-500">-</div>
+                `;
+            }
+
+            processedCount++;
+            updateUI();
+        }
+
+        function updateUI() {
+            document.getElementById('progressText').innerText = `${processedCount} / ${domains.length}`;
+            document.getElementById('adCount').innerText = adCount;
+            document.getElementById('failCount').innerText = failCount;
+        }
+
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            if (isRunning) return;
+            isRunning = true;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('startBtn').innerText = 'Auditoria em Curso...';
+            document.getElementById('results').innerHTML = '';
+            
+            processedCount = 0;
+            adCount = 0;
+            failCount = 0;
+            updateUI();
+
+            // Processamento sequencial para respeitar a vontade do usuário de "aguardar mesmo que demore"
+            // e garantir que o Unbound processe cada requisição com atenção à validação DNSSEC
+            for (const domain of domains) {
+                if (!isRunning) break;
+                await testDNS(domain);
+                // Pequeno delay para visualização do processo
+                await new Promise(r => setTimeout(r, 100));
+            }
+
+            isRunning = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('startBtn').innerText = 'Reiniciar Auditoria';
+        });
+
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            location.reload();
+        });
+    </script>
+</body>
+</html>

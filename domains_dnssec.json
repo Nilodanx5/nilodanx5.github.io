@@ -1,0 +1,12 @@
+[
+  "google.com", "cloudflare.com", "verisign.com", "iana.org", "icann.org",
+  "amazon.com", "microsoft.com", "github.com", "whitehouse.gov", "nasa.gov",
+  "paypal.com", "visa.com", "mastercard.com", "stripe.com", "netflix.com",
+  "disney.com", "apple.com", "wikipedia.org", "isc.org", "dnssec-failed.org",
+  "fedoraproject.org", "debian.org", "archlinux.org", "ubuntu.com", "freebsd.org",
+  "uol.com.br", "globo.com", "registro.br", "gov.br", "bb.com.br",
+  "itau.com.br", "bradesco.com.br", "caixa.gov.br", "stackexchange.com", "reddit.com",
+  "nytimes.com", "theguardian.com", "bbc.co.uk", "lemonde.fr", "elpais.com",
+  "mit.edu", "harvard.edu", "stanford.edu", "ox.ac.uk", "usp.br",
+  "ripe.net", "arin.net", "apnic.net", "lacnic.net", "afrinic.net"
+]
